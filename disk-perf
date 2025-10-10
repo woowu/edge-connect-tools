@@ -1,0 +1,92 @@
+#!/usr/bin/bash
+
+cache=big
+block_sz=2M
+count=5
+round=10
+
+function usage() {
+    echo disk-perf
+    echo OPTIONS:
+    echo "  -h                  help"
+    echo "  -c <big|small>      use big or small cache size"
+    echo "  -b size             block size to write, e.g., 1M"
+    echo "  -c count            number of blocks to write in each round"
+    echo "  -r round            number of test iteration"
+}
+
+PARAMS=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            usage
+            shift
+            exit 0
+            ;;
+        -c|--cache)
+            cache=$2
+            shift
+            shift
+            ;;
+        -b|--block-size)
+            block_sz=$2
+            shift
+            shift
+            ;;
+        -c|--count)
+            count=$2
+            shift
+            shift
+            ;;
+        -r|--round)
+            round=$2
+            shift
+            shift
+            ;;
+        *)
+            PARAMS="$PARAMS $1"
+            shift
+            ;;
+    esac
+done
+eval set -- "$PARAMS"
+
+if [ "$cache" == "big" ]; then
+    sysctl -w vm.dirty_ratio=15 vm.dirty_background_ratio=10 >/dev/null
+elif [ "$cache" == "small" ]; then 
+    sysctl -w vm.dirty_bytes=262144 vm.dirty_background_bytes=174080 >/dev/null
+else
+    echo "invalid cache config: $cache"
+    exit 1
+fi
+
+dirty_threshold=$(cat /proc/vmstat | grep nr_dirty_threshold | cut -d' ' -f2)
+dirty_bg_threshold=$(cat /proc/vmstat | grep nr_dirty_background_threshold | cut -d' ' -f2)
+dirty_threshold=$(echo "$dirty_threshold 4 * p" | dc)
+dirty_bg_threshold=$(echo "$dirty_bg_threshold 4 * p" | dc)
+echo dirty_threshold=$dirty_threshold kB dirty_background_threshold=$dirty_bg_threshold kB
+echo test $round rounds using block size $block_sz, number of blocks $count
+
+if echo $block_sz | grep M >/dev/null ; then
+    sz=$(echo $block_sz | sed -n 's/\([0-9]\+\)M/\1/p')
+    sz=$(echo "$sz 1024 * 1024 * p" | dc)
+elif echo $block_sz | grep K >/dev/null ; then
+    sz=$(echo $block_sz | sed -n 's/\([0-9]\+\)K/\1/p')
+    sz=$(echo "$sz 1024 * p" | dc)
+else
+    sz=$block_sz
+fi
+sz=$(echo "$sz $count * p" | dc)
+
+sync
+echo "Index,BlockSize,Count,kBps" > disk-perf.csv
+for n in `seq $round`; do
+    t0=$(cat /proc/uptime | cut -d' ' -f1)
+    dd if=/dev/zero of=/mnt/rootfs/zeros.dat bs=$block_sz count=$count &>/dev/null
+    sync &>/dev/null
+    t1=$(cat /proc/uptime | cut -d' ' -f1)
+    t=$(echo "3 k $t1 $t0 - p" | dc)
+    speed=$(echo "3 k $sz $t / 1000 / p" | dc)
+    echo $sz bytes in ${t} seconds, $speed kB/s
+    echo "$n,$block_sz,$count,$speed" >> disk-perf.csv
+done
