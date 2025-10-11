@@ -4,17 +4,34 @@ cache=default
 block_sz=2M
 count=5
 round=10
+log_dirty=no
+do_sync=yes
 
 function usage() {
     echo disk-perf [OPTIONS]
     echo "Measure file system bandwidth."
     echo "Note: Please run this tool in a tmpfs directory."
     echo OPTIONS:
-    echo "  -h                      help"
-    echo "  -c <default|256K|3M>    choose cache configuration"
-    echo "  -b size                 block size to write, e.g., 1M"
-    echo "  -c count                number of blocks to write in each round"
-    echo "  -r round                number of test iteration"
+    echo "  -h                                      help"
+    echo "  -c|--cache          <default|256K|3M>   choose cache configuration"
+    echo "  -b|--block-size     size                block size to write, e.g., 1M"
+    echo "  -c|--count count                        number of blocks to write in each round"
+    echo "  -r|--round round                        number of test iteration"
+    echo "  -d|--log-dirty                          log dirty bytes level; will not do 'sync' at the end of each test"
+    echo "  -S|--no-sync                            call sync after each write"
+}
+
+function log_dirty_pages() {
+    # Dirty: KB
+    echo "Index,Time,Dirty" > dirty.csv
+    n=1
+    while true; do
+        t=$(cat /proc/uptime | cut -d' ' -f1)
+        dirty=$(cat /proc/meminfo | grep Dirty | sed -n 's/Dirty:\s\+\([0-9]\+\) kB/\1/p')
+        echo "$n,$t,$dirty" >> dirty.csv
+        sleep 1
+        n=$((n + 1))
+    done
 }
 
 PARAMS=""
@@ -45,6 +62,14 @@ while [ $# -gt 0 ]; do
             shift
             shift
             ;;
+        -d|--log-dirty)
+            log_dirty=yes
+            shift
+            ;;
+        -S|--no-sync)
+            do_sync=no
+            shift
+            ;;
         *)
             PARAMS="$PARAMS $1"
             shift
@@ -64,12 +89,16 @@ else
     exit 1
 fi
 
+# Stop any service which can create dirty pages
+# 
+s6-svc -wD -d /run/service/flash-syn 2>/dev/null
+
 dirty_threshold=$(cat /proc/vmstat | grep nr_dirty_threshold | cut -d' ' -f2)
 dirty_bg_threshold=$(cat /proc/vmstat | grep nr_dirty_background_threshold | cut -d' ' -f2)
 dirty_threshold=$(echo "$dirty_threshold 4 * p" | dc)
 dirty_bg_threshold=$(echo "$dirty_bg_threshold 4 * p" | dc)
 echo dirty_threshold=$dirty_threshold kB dirty_background_threshold=$dirty_bg_threshold kB
-echo test $round rounds using block size $block_sz, number of blocks $count
+echo test $round rounds writing of ${block_sz}x${count} blocks
 
 if echo $block_sz | grep M >/dev/null ; then
     sz=$(echo $block_sz | sed -n 's/\([0-9]\+\)M/\1/p')
@@ -83,14 +112,25 @@ fi
 sz=$(echo "$sz $count * p" | dc)
 
 sync
-echo "Index,BlockSize,Count,kBps" > disk-perf.csv
+# Throughput: kBps
+echo "Index,Time,BlockSize,Count,Throughput" > disk-perf.csv
+if [ "$log_dirty" == "yes" ]; then
+    log_dirty_pages &
+    log_dirty_pid=$!
+fi
 for n in `seq $round`; do
     t0=$(cat /proc/uptime | cut -d' ' -f1)
     dd if=/dev/zero of=/mnt/rootfs/zeros.dat bs=$block_sz count=$count &>/dev/null
-    sync &>/dev/null
+    if [ "$do_sync" == "yes" ]; then
+        sync &>/dev/null
+    fi
     t1=$(cat /proc/uptime | cut -d' ' -f1)
     t=$(echo "3 k $t1 $t0 - p" | dc)
     speed=$(echo "3 k $sz $t / 1000 / p" | dc)
-    echo $sz bytes in ${t} seconds, $speed kB/s
-    echo "$n,$block_sz,$count,$speed" >> disk-perf.csv
+    echo [${n}] $sz bytes in ${t} seconds, $speed kB/s
+    echo "$n,$t0,$block_sz,$count,$speed" >> disk-perf.csv
 done
+
+if [ "$log_dirty" == "yes" ]; then
+    kill $log_dirty_pid
+fi
