@@ -1,18 +1,20 @@
 #!/usr/bin/bash
 
-cache=big
+cache=default
 block_sz=2M
 count=5
 round=10
 
 function usage() {
-    echo disk-perf
+    echo disk-perf [OPTIONS]
+    echo "Measure file system bandwidth."
+    echo "Note: Please run this tool in a tmpfs directory."
     echo OPTIONS:
-    echo "  -h                  help"
-    echo "  -c <big|small>      use big or small cache size"
-    echo "  -b size             block size to write, e.g., 1M"
-    echo "  -c count            number of blocks to write in each round"
-    echo "  -r round            number of test iteration"
+    echo "  -h                      help"
+    echo "  -c <default|256K|3M>    choose cache configuration"
+    echo "  -b size                 block size to write, e.g., 1M"
+    echo "  -c count                number of blocks to write in each round"
+    echo "  -r round                number of test iteration"
 }
 
 PARAMS=""
@@ -51,9 +53,11 @@ while [ $# -gt 0 ]; do
 done
 eval set -- "$PARAMS"
 
-if [ "$cache" == "big" ]; then
+if [ "$cache" == "default" ]; then
     sysctl -w vm.dirty_ratio=15 vm.dirty_background_ratio=10 >/dev/null
-elif [ "$cache" == "small" ]; then 
+elif [ "$cache" == "3M" ]; then 
+    sysctl -w vm.dirty_bytes=3145728 vm.dirty_background_bytes=2097152 >/dev/null
+elif [ "$cache" == "256K" ]; then 
     sysctl -w vm.dirty_bytes=262144 vm.dirty_background_bytes=174080 >/dev/null
 else
     echo "invalid cache config: $cache"
