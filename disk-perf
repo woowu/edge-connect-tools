@@ -3,7 +3,7 @@
 cache=default
 block_sz=2M
 count=5
-round=10
+time=30 # minutes
 log_dirty=no
 do_sync=yes
 
@@ -15,8 +15,8 @@ function usage() {
     echo "  -h                                      help"
     echo "  -c|--cache          <default|256K|3M>   choose cache configuration"
     echo "  -b|--block-size     size                block size to write, e.g., 1M"
-    echo "  -c|--count count                        number of blocks to write in each round"
-    echo "  -r|--round round                        number of test iteration"
+    echo "  -c|--count          count               number of blocks to write in each round"
+    echo "  -t|--time           minutes             run the test for how many minutes"
     echo "  -d|--log-dirty                          log dirty bytes level; will not do 'sync' at the end of each test"
     echo "  -S|--no-sync                            call sync after each write"
 }
@@ -57,8 +57,8 @@ while [ $# -gt 0 ]; do
             shift
             shift
             ;;
-        -r|--round)
-            round=$2
+        -t|--time)
+            time=$2
             shift
             shift
             ;;
@@ -98,7 +98,7 @@ dirty_bg_threshold=$(cat /proc/vmstat | grep nr_dirty_background_threshold | cut
 dirty_threshold=$(echo "$dirty_threshold 4 * p" | dc)
 dirty_bg_threshold=$(echo "$dirty_bg_threshold 4 * p" | dc)
 echo dirty_threshold=$dirty_threshold kB dirty_background_threshold=$dirty_bg_threshold kB
-echo test $round rounds writing of ${block_sz}x${count} blocks
+echo test $time minutes writing of ${block_sz}x${count} blocks
 
 if echo $block_sz | grep M >/dev/null ; then
     sz=$(echo $block_sz | sed -n 's/\([0-9]\+\)M/\1/p')
@@ -118,7 +118,9 @@ if [ "$log_dirty" == "yes" ]; then
     log_dirty_pages &
     log_dirty_pid=$!
 fi
-for n in `seq $round`; do
+start_time=`date +%s`
+n=1
+while true ; do
     t0=$(cat /proc/uptime | cut -d' ' -f1)
     dd if=/dev/zero of=/mnt/rootfs/zeros.dat bs=$block_sz count=$count &>/dev/null
     if [ "$do_sync" == "yes" ]; then
@@ -127,8 +129,14 @@ for n in `seq $round`; do
     t1=$(cat /proc/uptime | cut -d' ' -f1)
     t=$(echo "3 k $t1 $t0 - p" | dc)
     speed=$(echo "3 k $sz $t / 1000 / p" | dc)
-    echo [${n}] $sz bytes in ${t} seconds, $speed kB/s
+    echo `date +%s`  $sz bytes in ${t} seconds, $speed kB/s
     echo "$n,$t0,$block_sz,$count,$speed" >> disk-perf.csv
+    n=$((n + 1))
+
+    now=`date +%s`
+    if [ $(((now - start_time)/60)) -ge $time ]; then
+        break;
+    fi
 done
 
 if [ "$log_dirty" == "yes" ]; then
