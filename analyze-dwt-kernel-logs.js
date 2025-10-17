@@ -46,7 +46,7 @@ function onLine(state, time, msg)
 
     if (msg.match(/^balance_dirty_pages\(/)) {
         state.accPause = 0;
-        state.started = true;
+        if (! state.started) state.started = true;
     }
 
     if (! state.started) return;
