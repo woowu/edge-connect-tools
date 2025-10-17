@@ -14,7 +14,8 @@ printf <- function(...) invisible(print(sprintf(...)))
 png(filename='dirty-and-pause.png', width=860, height=640)
 
 d <- read.csv('kernel-dwt-events.csv')
-time_range=c(min(d$Time), max(d$Time))
+d$Time <- d$Time - d$Time[1]
+time_range=c(0, max(d$Time))
 
 p1 <- ggplot(d %>% filter(Event == 'AccDirty'), aes(x=Time, y=Value)) +
         geom_line() +
