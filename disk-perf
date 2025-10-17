@@ -83,7 +83,7 @@ if [ "$cache" == "default" ]; then
 elif [ "$cache" == "3M" ]; then 
     sysctl -w vm.dirty_bytes=3145728 vm.dirty_background_bytes=2097152 >/dev/null
 elif [ "$cache" == "256K" ]; then 
-    sysctl -w vm.dirty_bytes=262144 vm.dirty_background_bytes=174080 >/dev/null
+    sysctl -w vm.dirty_bytes=262144 vm.dirty_background_bytes=176128 >/dev/null
 else
     echo "invalid cache config: $cache"
     exit 1
@@ -91,6 +91,7 @@ fi
 
 # Stop any service which can create dirty pages
 # 
+echo stopping flash-sync
 s6-svc -wD -d /run/service/flash-syn 2>/dev/null
 
 dirty_threshold=$(cat /proc/vmstat | grep nr_dirty_threshold | cut -d' ' -f2)
